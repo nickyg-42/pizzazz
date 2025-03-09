@@ -31,13 +31,18 @@ def upload_file():
             file.save(filepath)
             
             # Process the audio file
-            output_pdf = process_audio_to_sheet_music(filepath)
+            output_xml = process_audio_to_sheet_music(filepath)
             
             # Clean up the uploaded file
             os.remove(filepath)
             
-            # Send the PDF file
-            return send_file(output_pdf, as_attachment=True)
+            # Send the MusicXML file
+            return send_file(
+                output_xml,
+                mimetype='application/vnd.recordare.musicxml+xml',
+                as_attachment=True,
+                download_name='sheet_music.musicxml'
+            )
             
     return render_template('index.html')
 
