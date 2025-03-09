@@ -78,11 +78,15 @@ def quantize_duration(duration, base_note_length=0.25):
     return closest_duration * base_note_length
 
 def process_audio_to_sheet_music(audio_path):
-    # Load the audio file with higher sample rate
+    # Load the audio file with higher sample rate and normalize
     y, sr = librosa.load(audio_path, sr=44100)
+    y = librosa.util.normalize(y)
     
-    # Enhanced pre-processing
-    y = librosa.effects.preemphasis(y, coef=0.97)
+    # Enhanced pre-processing with less aggressive pre-emphasis
+    y = librosa.effects.preemphasis(y, coef=0.85)  # Reduced from 0.97
+    
+    # Add harmonic extraction before pitch detection
+    y_harmonic = librosa.effects.harmonic(y, margin=4.0)
     
     # Get tempo and beat information first
     tempo, beat_length = get_tempo_and_beats(y, sr)
@@ -114,17 +118,44 @@ def process_audio_to_sheet_music(audio_path):
     
     onset_times = librosa.frames_to_time(onset_frames, sr=sr, hop_length=32)
     
-    # More balanced pitch detection
+    # More precise pitch detection with updated parameters
     pitches, magnitudes = librosa.piptrack(
-        y=y, 
+        y=y_harmonic,  # Use harmonic signal
         sr=sr,
-        n_fft=1024,  # Increased for better frequency resolution
+        n_fft=4096,    # Increased for better frequency resolution
         hop_length=32,
-        fmin=librosa.note_to_hz('A1'),  # Slightly higher minimum
-        fmax=librosa.note_to_hz('C7'),  # Slightly lower maximum
-        threshold=0.015  # Balanced threshold
+        fmin=librosa.note_to_hz('A0'),  # Full piano range
+        fmax=librosa.note_to_hz('C8'),
+        threshold=0.012,  # Slightly lower for better sensitivity
+        win_length=4096,  # Match n_fft for better accuracy
+        center=True
     )
     
+    # Add pitch correction
+    def adjust_pitch(midi_note):
+        """
+        Enhanced pitch correction with octave adjustment
+        """
+        # First, round to nearest semitone
+        semitone = round(midi_note)
+        cents_diff = (midi_note - semitone) * 100
+        
+        # More aggressive pitch correction
+        if abs(cents_diff) < 40:  # Increased from 30 to catch more slight deviations
+            # Check if note needs octave adjustment
+            note_in_octave = semitone % 12
+            if note_in_octave == 11 and cents_diff > 20:  # If very sharp B
+                return semitone + 1  # Adjust to C of next octave
+            elif note_in_octave == 0 and cents_diff < -20:  # If very flat C
+                return semitone - 1  # Adjust to B of previous octave
+            return semitone
+        
+        # For larger deviations, try to find nearest common piano note
+        piano_notes = [21, 23, 24, 26, 28, 29, 31, 33, 35, 36, 38, 40, 41, 43, 45, 
+                      47, 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 
+                      72, 74, 76, 77, 79, 81, 83, 84, 86, 88, 89, 91, 93, 95, 96, 108]
+        return min(piano_notes, key=lambda x: abs(x - midi_note))
+
     # Create score and parts
     score = stream.Score()
     treble_part = stream.Part()
@@ -167,13 +198,15 @@ def process_audio_to_sheet_music(audio_path):
             if prev_midi and abs(midi_note - prev_midi) < 2:
                 continue
                 
-            if midi_note >= 60:
-                n = note.Note(int(midi_note), quarterLength=quarter_length)
+            # Round to nearest integer and adjust octave if needed
+            adjusted_note = int(round(midi_note))
+            if adjusted_note >= 60:
+                n = note.Note(adjusted_note, quarterLength=quarter_length)
                 treble_part.append(n)
             else:
-                n = note.Note(int(midi_note), quarterLength=quarter_length)
+                n = note.Note(adjusted_note, quarterLength=quarter_length)
                 bass_part.append(n)
-            prev_midi = midi_note
+            prev_midi = adjusted_note
     
     score.append(treble_part)
     score.append(bass_part)
