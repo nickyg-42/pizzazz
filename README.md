@@ -1,0 +1,1 @@
+This was a project idea to convert piano mp3 audio into playable sheet music, unfortunately I was never able to tune it right. May revist in the future. The rythm produced is decent, but the sound accuracy is terrible usually.
